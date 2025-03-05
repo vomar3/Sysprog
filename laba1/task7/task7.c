@@ -15,13 +15,15 @@ typedef enum error {
 } error;
 
 typedef struct Files {
-    char name[1024];
+    char *name;
     unsigned long size;
     unsigned long inode;
     unsigned long blocks;
 } files;
 
 error list_files(const char *dirpath, files **my_files, int *capacity, int *size, int *j);
+
+void free_files(files *my_files, const int *size);
 
 int main(int argc, char *argv[]) {
     int i, capacity = 2, size = 0, j = 0;
@@ -49,15 +51,15 @@ int main(int argc, char *argv[]) {
         switch (list_files(argv[i], &my_files, &capacity, &size, &j)) {
             case MEMORY_ERROR:
                 printf("Memory error\n");
-                free(my_files);
+                free_files(my_files, &size);
                 return MEMORY_ERROR;
             case FILE_ERROR:
                 perror("opendir");
-                free(my_files);
+                free_files(my_files, &size);
                 return FILE_ERROR;
             case STAT_ERROR:
                 perror("stat");
-                free(my_files);
+                free_files(my_files, &size);
                 return STAT_ERROR;
             default:
                 for (; j < size; ++j) {
@@ -67,7 +69,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    free(my_files);
+    free_files(my_files, &size);
     return 0;
 }
 
@@ -112,6 +114,11 @@ error list_files(const char *dirpath, files **my_files, int *capacity, int *size
             return STAT_ERROR;
         }
 
+        (*my_files)[*size].name = (char *) malloc((strlen(entry->d_name) + 1) * sizeof (char));
+        if (!(*my_files)[*size].name) {
+            return MEMORY_ERROR;
+        }
+
         strcpy((*my_files)[*size].name, entry->d_name);
         (*my_files)[*size].size = st.st_size;
         (*my_files)[*size].inode = st.st_ino;
@@ -123,4 +130,18 @@ error list_files(const char *dirpath, files **my_files, int *capacity, int *size
     closedir(dir);
 
     return OK;
+}
+
+void free_files(files *my_files, const int *size) {
+    if (!my_files || !size) {
+        return;
+    }
+
+    int i;
+
+    for (i = 0; i < *size; ++i) {
+        free(my_files[i].name);
+    }
+
+    free(my_files);
 }
