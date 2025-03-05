@@ -16,6 +16,7 @@ typedef enum error {
 
 typedef struct Files {
     char *name;
+    char mode[18];
     unsigned long size;
     unsigned long inode;
     unsigned long blocks;
@@ -24,6 +25,8 @@ typedef struct Files {
 error list_files(const char *dirpath, files **my_files, int *capacity, int *size, int *j);
 
 void free_files(files *my_files, const int *size);
+
+error print_in_file(const char* path, const char* filename, files **my_files, const int *size);
 
 int main(int argc, char *argv[]) {
     int i, capacity = 2, size = 0, j = 0;
@@ -63,9 +66,11 @@ int main(int argc, char *argv[]) {
                 return STAT_ERROR;
             default:
                 for (; j < size; ++j) {
-                    printf("%-20s | Size: %-8lu | Inode: %-8lu | First block: %-8lu\n",
-                        my_files[j].name, my_files[j].size, my_files[j].inode, my_files[j].blocks);
+                    printf("%s%-15s | Size: %-8lu | Inode: %-8lu | First block: %-8lu\n",
+                        my_files[j].name, my_files[j].mode, my_files[j].size, my_files[j].inode, my_files[j].blocks);
                 }
+
+                break;
         }
     }
 
@@ -109,6 +114,10 @@ error list_files(const char *dirpath, files **my_files, int *capacity, int *size
 
         snprintf(path, sizeof(path), "%s/%s", dirpath, entry->d_name);
 
+        if (print_in_file(path, entry->d_name, my_files, size) != OK) {
+            return STAT_ERROR;
+        }
+
         // Если метаданные о файле не собрались, то увы
         if (stat(path, &st) == -1) {
             return STAT_ERROR;
@@ -144,4 +153,36 @@ void free_files(files *my_files, const int *size) {
     }
 
     free(my_files);
+}
+
+error print_in_file(const char* path, const char* filename, files **my_files, const int *size) {
+    if (!filename || !path || !my_files || !size) {
+        return MEMORY_ERROR;
+    }
+
+    struct stat buff;
+    int check = stat(path, &buff);
+    if (check == -1) {
+        return STAT_ERROR;
+    }
+
+    if (S_ISDIR(buff.st_mode)) {
+        strcpy((*my_files)[*size].mode, "[directory]");
+    } else if (S_ISREG(buff.st_mode)) {
+        strcpy((*my_files)[*size].mode, "[file]");
+    } else if (S_ISLNK(buff.st_mode)) {
+        strcpy((*my_files)[*size].mode, "[symlink]");
+    } else if (S_ISFIFO(buff.st_mode)) {
+        strcpy((*my_files)[*size].mode, "[FIFO]");
+    } else if (S_ISSOCK(buff.st_mode)) {
+        strcpy((*my_files)[*size].mode, "[socket]");
+    } else if (S_ISCHR(buff.st_mode)) {
+        strcpy((*my_files)[*size].mode, "[character device]");
+    } else if (S_ISBLK(buff.st_mode)) {
+        strcpy((*my_files)[*size].mode, "[block device]");
+    } else {
+        strcpy((*my_files)[*size].mode, "[block device]");
+    }
+
+    return OK;
 }
