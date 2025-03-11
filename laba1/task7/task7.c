@@ -181,7 +181,7 @@ error print_in_file(const char* path, const char* filename, files **my_files, co
     } else if (S_ISBLK(buff.st_mode)) {
         strcpy((*my_files)[*size].mode, "[block device]");
     } else {
-        strcpy((*my_files)[*size].mode, "[block device]");
+        strcpy((*my_files)[*size].mode, "[undefined]");
     }
 
     return OK;
