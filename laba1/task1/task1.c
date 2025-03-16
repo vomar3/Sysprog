@@ -51,7 +51,7 @@ error load_users_from_file(user **users, int *count_of_users, int *capacity);
 error update_sanctions_in_file(const char *filename, const char *login, int new_sanctions);
 
 int main() {
-    char flag[2], user_name[7], login_name[7], reg_name[7];
+    char flag[2], user_name[7], login_name[7], reg_name[7] = {};
     char check_input[10], time[10];
     int current_id = -1, check = 0, exit = 1, number, j = -1;
     int reg, capacity = 2, user_count = 0;
@@ -438,6 +438,23 @@ error howmuch_command(const char *date_str, const char *flag, double *result) {
 
     if (sscanf(date_str, "%d-%d-%d", &input_time.tm_year, &input_time.tm_mon, &input_time.tm_mday) != 3) {
         return INVALID_INPUT;
+    }
+
+    if (input_time.tm_mon > 12 || input_time.tm_mon < 1 || input_time.tm_mday < 1
+        || input_time.tm_mday > 31 || input_time.tm_year < 1900) {
+        return INVALID_INPUT;
+    }
+
+    if (input_time.tm_mon == 2) {
+        if (input_time.tm_mday > 29) {
+            return INVALID_INPUT;
+        }
+
+        if (input_time.tm_mday == 29) {
+            if (!(input_time.tm_year % 4 == 0 && (input_time.tm_year % 100 != 0 || input_time.tm_year % 400 == 0))) {
+                return INVALID_INPUT;
+            }
+        }
     }
 
     input_time.tm_year -= 1900;
