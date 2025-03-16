@@ -457,6 +457,12 @@ error howmuch_command(const char *date_str, const char *flag, double *result) {
         }
     }
 
+    if (input_time.tm_mday == 31) {
+        if (input_time.tm_mon == 4 || input_time.tm_mon == 6 || input_time.tm_mon == 9 || input_time.tm_mon == 11) {
+            return INVALID_INPUT;
+        }
+    }
+
     input_time.tm_year -= 1900;
     input_time.tm_mon -= 1;
 
