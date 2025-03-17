@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 1024
 
 typedef enum errors {
     OK,
@@ -20,11 +20,11 @@ error mask(const char *filename, int *result, const int *mask);
 
 error copyN(const char *filename, const int *n);
 
-error find(const char *SearchString, const int *FileCounts, char **FileNames, int *size, int *capacity, char *fileNames[]);
+error find(const char *SearchString, const int *FileCounts, char **FileAnswerNames, int *size, int *capacity, char *fileNames[]);
 
 int main(int argc, char const *argv[]) {
     int i, result, n, mask_value, capacity = 2, size = 0;
-    char *operation, *value, *FileNames;
+    char *operation, *value, *FileAnswerNames;
     int HowManyFiles;
 
     if (argc < 3) {
@@ -39,6 +39,8 @@ int main(int argc, char const *argv[]) {
         }
     }
 
+    // value будет отвечать за вводимое значение (при mask и find), иначе используется вместо operation
+    // operation отвечает за вводимую операцию (при mask и find)
     value = argv[argc - 1];
     operation = argv[argc - 2];
 
@@ -94,26 +96,26 @@ int main(int argc, char const *argv[]) {
             }
         }
     } else if (strcmp(operation, "find") == 0) {
-        FileNames = (char *) malloc (sizeof(char) * capacity);
-        if (!FileNames) {
+        FileAnswerNames = (char *) malloc (sizeof(char) * capacity);
+        if (!FileAnswerNames) {
             printf("Memory error\n");
             return MEMORY_ERROR;
         }
 
         HowManyFiles = argc - 2;
 
-        switch (find(value, &HowManyFiles, &FileNames, &size, &capacity, &argv[1])) {
+        switch (find(value, &HowManyFiles, &FileAnswerNames, &size, &capacity, &argv[1])) {
             case MEMORY_ERROR:
                 printf("Memory error\n");
-                free(FileNames);
+                free(FileAnswerNames);
                 return MEMORY_ERROR;
             case FILE_ERROR:
                 printf("File error\n");
-                free(FileNames);
+                free(FileAnswerNames);
                 return FILE_ERROR;
             case PID_ERROR:
                 printf("PID error\n");
-                free(FileNames);
+                free(FileAnswerNames);
                 return PID_ERROR;
             default:
                 if (size == 0) {
@@ -121,13 +123,13 @@ int main(int argc, char const *argv[]) {
                 } else {
                     printf("Files with the specified substring\n");
                     for (i = 0; i < size; ++i) {
-                        printf("%s\n", &FileNames[i]);
+                        printf("%s\n", &FileAnswerNames[i]);
                     }
                 }
                 break;
         }
 
-        free(FileNames);
+        free(FileAnswerNames);
 
     } else {
         printf("Undefined command\n");
@@ -142,6 +144,7 @@ error XorN(const char *filename, const int *n, int *result) {
         return MEMORY_ERROR;
     }
 
+    // Выделения буффера для чтения нужного нам количества байтов
     short buffer[1 << *n];
     int ReadBytes, i;
     FILE *file;
@@ -194,20 +197,31 @@ error copyN(const char *filename, const int *n) {
         return MEMORY_ERROR;
     }
 
-    int i, bytesRead;
+    int i, bytesRead, len;
     pid_t pid;
     char newFilename[256];
     FILE *src, *dst;
-    char buffer[BUFFER_SIZE];
+    char buffer[BUFFER_SIZE], BaseName[127], Expansion[10];
+    char *SearchDot;
 
-    for (i = 0; i <= *n; ++i) {
+    SearchDot = strchr(filename, '.');
+    if (!SearchDot) {
+        return INVALID_INPUT;
+    }
+
+    len = SearchDot - filename;
+    strncpy(BaseName, filename, len);
+    BaseName[len] = '\0';
+    strcpy(Expansion, SearchDot);
+
+    for (i = 0; i < *n; ++i) {
         pid = fork();
         if (pid < 0) {
             return PID_ERROR;
         }
 
         if (pid == 0) {
-            snprintf(newFilename, sizeof(newFilename), "%s_copy%d", filename, i);
+            snprintf(newFilename, sizeof(newFilename), "%s(%d)%s", BaseName, i + 1, Expansion);
             src = fopen(filename, "rb");
             if (!src) {
                 return FILE_ERROR;
@@ -224,25 +238,28 @@ error copyN(const char *filename, const int *n) {
 
             fclose(src);
             fclose(dst);
+            exit(0);
         }
     }
 
+    // Ждем-с дочерние процессы
     while (wait(NULL) > 0);
 
     return OK;
 }
 
-error find(const char *SearchString, const int *FileCounts, char **FileNames, int *size, int *capacity, char *fileNames[]) {
-    if (!SearchString || !FileCounts || !FileNames || !size || !capacity || !fileNames) {
+error find(const char *SearchString, const int *FileCounts, char **FileAnswerNames, int *size, int *capacity, char *fileNames[]) {
+    if (!SearchString || !FileCounts || !FileAnswerNames || !size || !capacity || !fileNames) {
         return MEMORY_ERROR;
     }
 
-    int i, status;
+    int i;
     pid_t pid;
     FILE *file;
     char line[BUFFER_SIZE];
     char *for_realloc;
     for (i = 0; i < *FileCounts; ++i) {
+        // Поиск происходит в отдельной процессе
         pid = fork();
         if (pid < 0) {
             return PID_ERROR;
@@ -264,17 +281,19 @@ error find(const char *SearchString, const int *FileCounts, char **FileNames, in
                         *fileNames = for_realloc;
                     }
 
+                    // Для удобства вывода файлы закинул в массив
                     (*fileNames)[*size] = *fileNames[i];
                     (*size)++;
-                    fclose(file);
+                    break;
                 }
             }
+
+            fclose(file);
         }
     }
 
-    for (i = 0; i < *FileCounts; ++i) {
-        wait(&status);
-    }
+    // Ждем-с дочерние процессы
+    while (wait(NULL) > 0);
 
     return OK;
 }
