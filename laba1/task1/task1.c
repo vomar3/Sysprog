@@ -55,6 +55,7 @@ int main() {
     char check_input[10], time[10];
     int current_id = -1, check = 0, exit = 1, number, j = -1;
     int reg, capacity = 2, user_count = 0;
+    int for_check_correct_write = 1;
     unsigned int reg_pass, answer, pass;
     bool check_reg = false;
     double result;
@@ -71,7 +72,11 @@ int main() {
     }
 
     lower_menu();
-    scanf("%d", &reg);
+    while (scanf("%d", &reg) != 1) {
+        printf("Invalid input\n");
+        clear_input_buffer();
+        lower_menu();
+    }
 
     while (exit) {
         switch (reg) {
@@ -130,7 +135,11 @@ int main() {
                 }
 
                 lower_menu();
-                scanf("%d", &reg);
+                while (scanf("%d", &reg) != 1) {
+                    printf("Invalid input\n");
+                    clear_input_buffer();
+                    lower_menu();
+                }
                 break;
             case 2:
                 printf("Enter your login for authorization: ");
@@ -204,7 +213,11 @@ int main() {
 
                 check = 0;
                 lower_menu();
-                scanf("%d", &reg);
+                while (scanf("%d", &reg) != 1) {
+                    printf("Invalid input\n");
+                    clear_input_buffer();
+                    lower_menu();
+                }
                 break;
             case 3:
                 exit = 0;
@@ -213,7 +226,11 @@ int main() {
                 printf("Try again\n");
 
                 lower_menu();
-                scanf("%d", &reg);
+                while (scanf("%d", &reg) != 1) {
+                    printf("Invalid input\n");
+                    clear_input_buffer();
+                    lower_menu();
+                }
                 break;
         }
     }
