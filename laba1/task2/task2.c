@@ -1,299 +1,245 @@
+#include <ctype.h>
+#include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <sys/types.h>
 
-#define BUFFER_SIZE 1024
-
-typedef enum errors {
+typedef enum error {
     OK,
     INVALID_INPUT,
     MEMORY_ERROR,
-    FILE_ERROR,
-    PID_ERROR,
+    PROBLEMS_WITH_FILE,
+    PROBLEMS_WITH_PID,
+    NOT_A_NUMBER,
 } error;
 
-error XorN(const char *filename, const int *n, int *result);
+error checkN(const char *N);
 
-error mask(const char *filename, int *result, const int *mask);
+error сopyN(const char *FileName, const int *NeedCopies);
 
-error copyN(const char *filename, const int *n);
-
-error find(const char *SearchString, const int *FileCounts, char **FileAnswerNames, int *size, int *capacity, char *fileNames[]);
+error find(char const *FindString, char **FindFiles, const char *Files[], const int *CountFiles, int *size, int *capacity);
 
 int main(int argc, char const *argv[]) {
-    int i, result, n, mask_value, capacity = 2, size = 0;
-    char *operation, *value, *FileAnswerNames;
-    int HowManyFiles;
+    int i, N, size = 0, capacity = 2;
+    char *AnswerString;
 
     if (argc < 3) {
-        printf("Enter in the format: ./a.out <paths> <flag>\n");
+        printf("Invalid input\n");
         return INVALID_INPUT;
     }
 
     for (i = 0; i < argc; i++) {
         if (argv[i] == NULL) {
-            printf("Error with arguments\n");
-            return MEMORY_ERROR;
+            printf("Invalid input\n");
+            return INVALID_INPUT;
         }
     }
 
-    // value будет отвечать за вводимое значение (при mask и find), иначе используется вместо operation
-    // operation отвечает за вводимую операцию (при mask и find)
-    value = argv[argc - 1];
-    operation = argv[argc - 2];
+    if (strncmp(argv[argc - 1], "copy", 4) == 0) {
+        if (checkN(argv[argc - 1]) != OK) {
+            printf("Error with a number\n");
+        } else {
+            N = strtol(argv[argc - 1] + 4, NULL, 10);
+            if (N < 0 || N > 10) {
+                printf("Too many copies\n");
+                return INVALID_INPUT;
+            }
 
-    if (strncmp(value, "xor", 3) == 0) {
-        n = strtol(value + 3, NULL, 10);
-        for (i = 1; i < argc - 1; i++) {
-            switch (XorN(argv[i], &n, &result)) {
-                case FILE_ERROR:
-                    printf("File error\n");
-                    return FILE_ERROR;
-                case INVALID_INPUT:
-                    printf("Invalid input: N must be >= 2 and <= 6\n");
-                    return INVALID_INPUT;
-                case MEMORY_ERROR:
-                    printf("Memory error\n");
-                    return MEMORY_ERROR;
-                default:
-                    printf("%d", result);
+            for (i = 1; i < argc - 1; ++i) {
+                switch (сopyN(argv[i], &N)) {
+                    case MEMORY_ERROR:
+                        printf("Memory error. %s not processed\n", argv[i]);
                     break;
+                    case PROBLEMS_WITH_FILE:
+                        printf("Problem with file. %s not processed\n", argv[i]);
+                    break;
+                    case PROBLEMS_WITH_PID:
+                        printf("Problem with pid. %s not processed\n", argv[i]);
+                    break;
+                    default:
+                        printf("File %s successful processed\n", argv[i]);
+                    break;
+                }
             }
         }
-    } else if (strcmp(operation, "mask") == 0) {
-        mask_value = strtoul(value, NULL, 16);
-        for (i = 1; i < argc - 2; i++) {
-            switch (mask(argv[i], &result, &mask_value)) {
-                case FILE_ERROR:
-                    printf("File error\n");
-                    return FILE_ERROR;
-                case MEMORY_ERROR:
-                    printf("Memory error\n");
-                    return MEMORY_ERROR;
-                default:
-                    printf("The number of numbers that fit the mask = %d", result);
-                    break;
-            }
-        }
-    } else if (strncmp(value, "copy", 4) == 0) {
-        n = strtol(value + 4, NULL, 10);
-        for (i = 1; i < argc - 1; i++) {
-            switch (copyN(argv[i], &n)) {
-                case FILE_ERROR:
-                    printf("File error\n");
-                    return FILE_ERROR;
-                case MEMORY_ERROR:
-                    printf("Memory error\n");
-                    return MEMORY_ERROR;
-                case PID_ERROR:
-                    printf("PID error\n");
-                    return PID_ERROR;
-                default:
-                    printf("Copying completed\n");
-                    break;
-            }
-        }
-    } else if (strcmp(operation, "find") == 0) {
-        FileAnswerNames = (char *) malloc (sizeof(char) * capacity);
-        if (!FileAnswerNames) {
-            printf("Memory error\n");
-            return MEMORY_ERROR;
-        }
+    } else if (strncmp(argv[argc - 2], "find", 4) == 0) {
+        AnswerString = (char *) malloc(capacity * sizeof(char));
+        N = argc - 3;
 
-        HowManyFiles = argc - 2;
-
-        switch (find(value, &HowManyFiles, &FileAnswerNames, &size, &capacity, &argv[1])) {
+        switch (find(argv[argc - 1], &AnswerString, &argv[0], &N, &size, &capacity)) {
             case MEMORY_ERROR:
                 printf("Memory error\n");
-                free(FileAnswerNames);
-                return MEMORY_ERROR;
-            case FILE_ERROR:
-                printf("File error\n");
-                free(FileAnswerNames);
-                return FILE_ERROR;
-            case PID_ERROR:
-                printf("PID error\n");
-                free(FileAnswerNames);
-                return PID_ERROR;
+                free(AnswerString);
+                break;
+            case PROBLEMS_WITH_FILE:
+                printf("Problem with file\n");
+                free(AnswerString);
+                break;
+            case PROBLEMS_WITH_PID:
+                printf("Problem with pid\n");
+                free(AnswerString);
+                break;
             default:
-                if (size == 0) {
-                    printf("The specified substring was not found in the files\n");
-                } else {
-                    printf("Files with the specified substring\n");
-                    for (i = 0; i < size; ++i) {
-                        printf("%s\n", &FileAnswerNames[i]);
-                    }
+                printf("Files successful processed\n");
+
+                for (i = 0; i < size; ++i) {
+                    printf("Path: %s\n", &AnswerString[i]);
                 }
+
                 break;
         }
 
-        free(FileAnswerNames);
-
-    } else {
-        printf("Undefined command\n");
-        return INVALID_INPUT;
+        free(AnswerString);
     }
 
     return 0;
 }
 
-error XorN(const char *filename, const int *n, int *result) {
-    if (!filename || !n || !result) {
+error сopyN(const char *FileName, const int *NeedCopies) {
+    if (!FileName || !NeedCopies) {
         return MEMORY_ERROR;
     }
 
-    // Выделения буффера для чтения нужного нам количества байтов
-    short buffer[1 << *n];
-    int ReadBytes, i;
-    FILE *file;
-
-    if (!(*n >= 2 && *n <= 6)) {
-        return INVALID_INPUT;
-    }
-
-    file = fopen(filename, "rb");
-    if (!file) {
-        return FILE_ERROR;
-    }
-
-    *result = 0;
-    while ((ReadBytes = fread(buffer, 1, (1 << *n), file)) > 0) {
-        for (i = 0; i < ReadBytes; i++) {
-            *result ^= buffer[i];
-        }
-    }
-
-    fclose(file);
-    return OK;
-}
-
-error mask(const char *filename, int *result, const int *mask) {
-    if (!filename || !result || !mask) {
-        return MEMORY_ERROR;
-    }
-
-    int value, count = 0;
-    FILE *file = fopen(filename, "rb");
-    if (!file) {
-        return FILE_ERROR;
-    }
-
-    while (fread(&value, sizeof(int), 1, file) == 1) {
-        if ((value & *mask) == *mask) {
-            count++;
-        }
-    }
-
-    *result = count;
-
-    fclose(file);
-    return OK;
-}
-
-error copyN(const char *filename, const int *n) {
-    if (!filename || !n) {
-        return MEMORY_ERROR;
-    }
-
-    int i, bytesRead, len;
+    int len, i, symbol, status, has_error = OK;
     pid_t pid;
-    char newFilename[256];
-    FILE *src, *dst;
-    char buffer[BUFFER_SIZE], BaseName[127], Expansion[10];
+    char expansion[10]; // Расширение
+    char name[256]; // Имя без точки и расширения
+    char NewFileName[270];
     char *SearchDot;
-
-    SearchDot = strchr(filename, '.');
-    if (!SearchDot) {
-        return INVALID_INPUT;
+    FILE *file = fopen(FileName, "r"), *NewFile;
+    if (!file) {
+        return PROBLEMS_WITH_FILE;
     }
 
-    len = SearchDot - filename;
-    strncpy(BaseName, filename, len);
-    BaseName[len] = '\0';
-    strcpy(Expansion, SearchDot);
+    SearchDot = strrchr(FileName, '.');
+    if (!SearchDot) {
+        fclose(file);
+        return PROBLEMS_WITH_FILE;
+    }
 
-    for (i = 0; i < *n; ++i) {
+    strcpy(expansion, SearchDot);
+    expansion[strlen(expansion)] = '\0';
+    len = SearchDot - FileName;
+    strncpy(name, FileName, len);
+    name[len] = '\0';
+
+    for (i = 0; i < *NeedCopies; ++i) {
         pid = fork();
+
         if (pid < 0) {
-            return PID_ERROR;
+            exit(PROBLEMS_WITH_PID);
         }
 
         if (pid == 0) {
-            snprintf(newFilename, sizeof(newFilename), "%s(%d)%s", BaseName, i + 1, Expansion);
-            src = fopen(filename, "rb");
-            if (!src) {
-                return FILE_ERROR;
+
+            file = fopen(FileName, "r");
+            if (!file) {
+                exit(PROBLEMS_WITH_FILE);
             }
 
-            dst = fopen(newFilename, "wb");
-            if (!dst) {
-                fclose(src);
-                return FILE_ERROR;
-            }
-            while ((bytesRead = fread(buffer, 1, BUFFER_SIZE, src)) > 0) {
-                fwrite(buffer, 1, bytesRead, dst);
+            snprintf(NewFileName, sizeof(NewFileName), "%s (%d)%s", name, i + 1, expansion);
+            NewFile = fopen(NewFileName, "w");
+
+            if (!NewFile) {
+                fclose(file);
+                exit(PROBLEMS_WITH_FILE);
             }
 
-            fclose(src);
-            fclose(dst);
-            exit(0);
+            while ((symbol = fgetc(file)) != EOF) {
+                fputc(symbol, NewFile);
+            }
+
+            fclose(NewFile);
+            fclose(file);
+            exit(OK);
         }
     }
 
-    // Ждем-с дочерние процессы
-    while (wait(NULL) > 0);
+    for (i = 0; i < *NeedCopies; i++) {
+        wait(&status);
+        // WIFEXITED(status) проверяет, завершился ли процесс нормально через exit()
+        // WEXITSTATUS(status) получает код возврата дочернего процесса
+        if (WIFEXITED(status) && WEXITSTATUS(status) != OK) {
+            has_error = WEXITSTATUS(status); // Запоминаем ошибку (если была)
+        }
+    }
 
-    return OK;
+    //while (wait(NULL) > 0);
+    return has_error;
 }
 
-error find(const char *SearchString, const int *FileCounts, char **FileAnswerNames, int *size, int *capacity, char *fileNames[]) {
-    if (!SearchString || !FileCounts || !FileAnswerNames || !size || !capacity || !fileNames) {
+error find(char const *FindString, char **FindFiles, const char *Files[], const int *CountFiles, int *size, int *capacity) {
+    if (!FindString || !FindFiles || !Files || !CountFiles || !size || !capacity) {
         return MEMORY_ERROR;
     }
 
     int i;
     pid_t pid;
     FILE *file;
-    char line[BUFFER_SIZE];
+    char line[2048];
     char *for_realloc;
-    for (i = 0; i < *FileCounts; ++i) {
-        // Поиск происходит в отдельной процессе
+
+    for (i = 0; i < *CountFiles; ++i) {
         pid = fork();
+
         if (pid < 0) {
-            return PID_ERROR;
+            return PROBLEMS_WITH_PID;
         }
 
         if (pid == 0) {
-            file = fopen(fileNames[i], "rb");
+            file = fopen(Files[i], "r");
             if (!file) {
-                return FILE_ERROR;
+                exit(PROBLEMS_WITH_FILE);
             }
 
             while (fgets(line, sizeof(line), file)) {
-                if (strstr(line, SearchString)) {
+                if (strstr(line, FindString) != NULL) {
                     if (*size == *capacity) {
-                        for_realloc = (char *) realloc(*fileNames, *capacity *= 2);
+                        *capacity *= 2;
+                        for_realloc = (char *) realloc (*FindFiles, *capacity * sizeof(char));
                         if (!for_realloc) {
+                            fclose(file);
                             return MEMORY_ERROR;
                         }
-                        *fileNames = for_realloc;
+                        *FindFiles = for_realloc;
                     }
 
-                    // Для удобства вывода файлы закинул в массив
-                    (*fileNames)[*size] = *fileNames[i];
+                    (*FindFiles)[*size] = strdup(Files[i]);
                     (*size)++;
+
                     break;
                 }
             }
 
             fclose(file);
+            exit(0);
         }
+
     }
 
-    // Ждем-с дочерние процессы
     while (wait(NULL) > 0);
+
+    return OK;
+}
+
+
+error checkN(const char *N) {
+    if (!N) {
+        return MEMORY_ERROR;
+    }
+
+    int i, len = strlen(N);
+
+    for (i = 4; i < len; ++i) {
+        if (!isdigit(N[i])) {
+            return NOT_A_NUMBER;
+        }
+    }
 
     return OK;
 }
