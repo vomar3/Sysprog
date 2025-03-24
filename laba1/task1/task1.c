@@ -55,7 +55,6 @@ int main() {
     char check_input[10], time[10];
     int current_id = -1, check = 0, exit = 1, number, j = -1;
     int reg, capacity = 2, user_count = 0;
-    int for_check_correct_write = 1;
     unsigned int reg_pass, answer, pass;
     bool check_reg = false;
     double result;
@@ -94,9 +93,11 @@ int main() {
                         continue;
                     }
 
-                    if (registration_login(&users, &user_count, &capacity, reg_name) == FOUND) {
+                    while (registration_login(&users, &user_count, &capacity, reg_name) == FOUND) {
                         printf("This login already exists\n");
-                        continue;
+                        printf("Write your login again:\n");
+                        scanf("%7s", reg_name);
+                        clear_input_buffer();
                     }
 
                     if (check_correct_login(reg_name) != OK) {
