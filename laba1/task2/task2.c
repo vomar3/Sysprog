@@ -1,13 +1,14 @@
 #include <ctype.h>
 #include <semaphore.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
-#include <sys/mman.h>
-#include <fcntl.h>
 #include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
 
 typedef enum error {
     OK,
@@ -22,11 +23,18 @@ error checkN(const char *N);
 
 error сopyN(const char *FileName, const int *NeedCopies);
 
-error find(char const *FindString, char **FindFiles, const char *Files[], const int *CountFiles, int *size, int *capacity);
+error FindString(const char **Files, int FileCount, const char *pattern, char *FoundIn, char *FlagFound);
+
+error String_To_uint32_t (const char *str, u_int32_t *result);
+
+error Xor(const char *FileName, int N, u_int64_t *result);
+
+error Mask(const char *FileName, const char *mask, int *count);
 
 int main(int argc, char const *argv[]) {
-    int i, N, size = 0, capacity = 2;
-    char *AnswerString;
+    int i, N, count;
+    char *AnswerString, FlagFound;
+    uint64_t XorResult;
 
     if (argc < 3) {
         printf("Invalid input\n");
@@ -40,7 +48,45 @@ int main(int argc, char const *argv[]) {
         }
     }
 
-    if (strncmp(argv[argc - 1], "copy", 4) == 0) {
+    if (strncmp(argv[argc - 1], "xor", 3) == 0) {
+        N = strtol(argv[argc - 1] + 3, NULL, 10);
+        if (N < 2 || N > 6) {
+            printf("Invalid input N. N must be >= 2 and <= 6\n");
+            return INVALID_INPUT;
+        }
+
+        for (i = 1; i < argc - 1; ++i) {
+            switch(Xor(argv[i], N, &XorResult)) {
+                case MEMORY_ERROR:
+                    printf("Memory error\n");
+                return MEMORY_ERROR;
+                case PROBLEMS_WITH_FILE:
+                    printf("Problem with file (%s)\n", argv[i]);
+                break;
+                default:
+                    printf("Xor [%s] result: %lu\n", argv[i], XorResult);
+                break;
+            }
+        }
+
+    } else if (strcmp(argv[argc - 2], "mask") == 0) {
+        for (i = 1; i < argc - 2; ++i) {
+            switch (Mask(argv[i], argv[argc - 1], &count)) {
+                case INVALID_INPUT:
+                    printf("Invalid input. Error with %s: \n", argv[argc - 1]);
+                    return INVALID_INPUT;
+                case MEMORY_ERROR:
+                    printf("Memory error\n");
+                    return MEMORY_ERROR;
+                case PROBLEMS_WITH_FILE:
+                    printf("Problem with file (%s)\n", argv[i]);
+                    break;
+                default:
+                    printf("Mask [%s] result: %d\n", argv[i], count);
+                    break;
+            }
+        }
+    } else if (strncmp(argv[argc - 1], "copy", 4) == 0) {
         if (checkN(argv[argc - 1]) != OK) {
             printf("Error with a number\n");
         } else {
@@ -54,47 +100,60 @@ int main(int argc, char const *argv[]) {
                 switch (сopyN(argv[i], &N)) {
                     case MEMORY_ERROR:
                         printf("Memory error. %s not processed\n", argv[i]);
-                    break;
+                        return MEMORY_ERROR;
                     case PROBLEMS_WITH_FILE:
                         printf("Problem with file. %s not processed\n", argv[i]);
-                    break;
+                        break;
                     case PROBLEMS_WITH_PID:
                         printf("Problem with pid. %s not processed\n", argv[i]);
-                    break;
+                        return PROBLEMS_WITH_PID;
                     default:
                         printf("File %s successful processed\n", argv[i]);
-                    break;
+                        break;
                 }
             }
         }
     } else if (strncmp(argv[argc - 2], "find", 4) == 0) {
-        AnswerString = (char *) malloc(capacity * sizeof(char));
+        AnswerString = (char *)malloc(sizeof(char) * argc - 3);
+        if (!AnswerString) {
+            printf("Memory error\n");
+            return MEMORY_ERROR;
+        }
+
         N = argc - 3;
 
-        switch (find(argv[argc - 1], &AnswerString, &argv[0], &N, &size, &capacity)) {
+        switch (FindString((const char **)argv + 1, N, argv[argc - 1], AnswerString, &FlagFound)) {
             case MEMORY_ERROR:
                 printf("Memory error\n");
                 free(AnswerString);
+                AnswerString = NULL;
                 break;
             case PROBLEMS_WITH_FILE:
                 printf("Problem with file\n");
                 free(AnswerString);
+                AnswerString = NULL;
                 break;
             case PROBLEMS_WITH_PID:
                 printf("Problem with pid\n");
                 free(AnswerString);
+                AnswerString = NULL;
                 break;
             default:
                 printf("Files successful processed\n");
 
-                for (i = 0; i < size; ++i) {
-                    printf("Path: %s\n", &AnswerString[i]);
+                for (i = 0; i < argc - 3; ++i) {
+                    if (FlagFound && AnswerString[i]) {
+                        printf("In file: %s string was found\n", argv[i + 1]);
+                    } else {
+                        printf("In file: %s string was NOT found\n", argv[i + 1]);
+                    }
                 }
 
                 break;
         }
 
         free(AnswerString);
+        AnswerString = NULL;
     }
 
     return 0;
@@ -173,60 +232,152 @@ error сopyN(const char *FileName, const int *NeedCopies) {
     return has_error;
 }
 
-error find(char const *FindString, char **FindFiles, const char *Files[], const int *CountFiles, int *size, int *capacity) {
-    if (!FindString || !FindFiles || !Files || !CountFiles || !size || !capacity) {
+error FindString(const char **Files, int FileCount, const char *pattern, char *FoundIn, char *FlagFound) {
+    if (!Files || !pattern || !FoundIn || !FlagFound) {
         return MEMORY_ERROR;
     }
-
-    int i;
+    
+    char *shared;
+    char symbol;
+    int i, idx = 0, pattern_size = strlen(pattern);
     pid_t pid;
-    FILE *file;
-    char line[2048];
-    char *for_realloc;
+    int shm_id;
 
-    for (i = 0; i < *CountFiles; ++i) {
+    shm_id = shmget(IPC_PRIVATE, (FileCount + 1) * sizeof(char), IPC_CREAT | 0666);
+
+    if (shm_id == -1) {
+        return MEMORY_ERROR;
+    }
+    
+    shared = (char *) shmat(shm_id, NULL, 0);
+    if (shared == (void *)-1) {
+        shmctl(shm_id, IPC_RMID, NULL);
+        return MEMORY_ERROR;
+    }
+    
+    memset(shared, 0, FileCount + 1);
+    
+    for (i = 0; i < FileCount; ++i) {
         pid = fork();
 
         if (pid < 0) {
+            shmdt(shared);
+            shmctl(shm_id, IPC_RMID, NULL);
             return PROBLEMS_WITH_PID;
         }
-
+        
         if (pid == 0) {
-            file = fopen(Files[i], "r");
+            FILE *file = fopen(Files[i], "r");
             if (!file) {
                 exit(PROBLEMS_WITH_FILE);
             }
-
-            while (fgets(line, sizeof(line), file)) {
-                if (strstr(line, FindString) != NULL) {
-                    if (*size == *capacity) {
-                        *capacity *= 2;
-                        for_realloc = (char *) realloc (*FindFiles, *capacity * sizeof(char));
-                        if (!for_realloc) {
-                            fclose(file);
-                            return MEMORY_ERROR;
-                        }
-                        *FindFiles = for_realloc;
+            
+            while ((symbol = fgetc(file)) != EOF) {
+                if (pattern[idx] == symbol) {
+                    if (idx == pattern_size - 1) {
+                        shared[FileCount] = 1;
+                        shared[i] = 1;
+                        break;
                     }
-
-                    (*FindFiles)[*size] = strdup(Files[i]);
-                    (*size)++;
-
-                    break;
+                    idx++;
+                } else {
+                    fseek(file, -idx, SEEK_CUR);
+                    idx = 0;
                 }
             }
 
             fclose(file);
-            exit(0);
-        }
 
+            exit(OK);
+        }
+        
     }
 
-    while (wait(NULL) > 0);
+    for (i = 0; i < FileCount; i++) {
+        wait(NULL);
+    }
+
+    *FlagFound = shared[FileCount];
+
+    memcpy(FoundIn, shared, FileCount * sizeof(char));
+    shmdt(shared);
+    shmctl(shm_id, IPC_RMID, NULL);
 
     return OK;
 }
 
+error Xor(const char *FileName, int N, u_int64_t *result) {
+    if (!FileName || !result) {
+        return MEMORY_ERROR;
+    }
+
+    uint64_t BlockSIzeBits = 1ULL << N, BitCount;
+    uint64_t XorSum = 0, CurrentBlockValue = 0;
+    int i, CurrentBit;
+    uint8_t byte;
+    FILE *file;
+
+    file = fopen(FileName, "rb");
+    if (!file) {
+        return PROBLEMS_WITH_FILE;
+    }
+
+    while (fread(&byte, 1, 1, file) == 1) {
+        for (i = 0; i < 8; ++i) {
+            CurrentBit = (byte >> i) & 1; // Получаем текущий бит
+
+            CurrentBlockValue |= (CurrentBit << BitCount); // Добавляем бит в блок
+
+            BitCount++;
+
+            if (BitCount == BlockSIzeBits) {
+                XorSum ^= CurrentBlockValue;
+                CurrentBlockValue = 0;
+                BitCount = 0;
+            }
+        }
+    }
+
+    // Обрабатываем последний неполный блок
+    if (BitCount > 0) {
+        XorSum ^= CurrentBlockValue;
+    }
+
+    fclose(file);
+    *result = XorSum;
+    return OK;
+}
+
+error Mask(const char *FileName, const char *mask, int *count) {
+    if (!FileName || !mask || !count) {
+        return MEMORY_ERROR;
+    }
+
+    u_int32_t WriteMask, num32;
+    int NewCount = 0;
+    size_t tst = 0;
+    FILE *file;
+
+    file = fopen(FileName, "rb");
+    if (!file) {
+        return PROBLEMS_WITH_FILE;
+    }
+
+    if (strlen(mask) > 4 || String_To_uint32_t(mask, &WriteMask)) {
+        fclose(file);
+        return INVALID_INPUT;
+    }
+
+    while ((tst == fread(&num32, sizeof(uint32_t), 1, file)) == 1) {
+        if (WriteMask & num32) {
+            ++NewCount;
+        }
+    }
+
+    fclose(file);
+    *count = NewCount;
+    return OK;
+}
 
 error checkN(const char *N) {
     if (!N) {
@@ -240,6 +391,28 @@ error checkN(const char *N) {
             return NOT_A_NUMBER;
         }
     }
+
+    return OK;
+}
+
+error String_To_uint32_t (const char *str, u_int32_t *result) {
+    if (!str || !result) {
+        return MEMORY_ERROR;
+    }
+
+    char *endinp;
+    unsigned long res;
+    res = strtoul(str, &endinp, 16);
+
+    if (res > UINT32_MAX) {
+        return INVALID_INPUT;
+    }
+
+    if (*endinp != '\0') {
+        return INVALID_INPUT;
+    }
+
+    *result = (u_int32_t)res;
 
     return OK;
 }
